@@ -1,0 +1,17 @@
+
+
+issuer
+https://engaging-lion-87.clerk.accounts.dev
+
+JWKS ENDPOINT
+https://engaging-lion-87.clerk.accounts.dev/.well-known/jwks.json
+
+CTRL + C TO STOP CONVEX
+$env:CLERK_JWT_ISSUER_DOMAIN="https://engaging-lion-87.clerk.accounts.dev"
+npx convex dev ->TO RESTART CONVEX
+
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_ZW5nYWdpbmctbGlvbi04Ny5jbGVyay5hY2NvdW50cy5kZXYk
+CLERK_SECRET_KEY=sk_test_Sp74cxu1IJ6RiLJqhUt072IXTT2sbr388apIckG5U0
+
+npx convex dev
+npm run dev
