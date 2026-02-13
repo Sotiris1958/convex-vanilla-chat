@@ -12,6 +12,7 @@
     "vite": "^7.3.1"
   },
   "dependencies": {
+    "@clerk/clerk-js": "^5.122.1",
     "convex": "^1.31.7"
   }
 }
