@@ -22,7 +22,7 @@ export default defineSchema({
     room: v.string(),
     userId: v.string(),
     name: v.string(),
-    sessionId: v.optional(v.string()),
+    sessionId: v.string(),
     lastSeen: v.number(),
   })
   .index("by_room", ["room"])
