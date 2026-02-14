@@ -4,7 +4,7 @@ import { v } from "convex/values";
 export default defineSchema({
   messages: defineTable({
     room: v.string(),
-	authorId: v.string(),
+    authorId: v.string(),
     author: v.string(),
     body: v.string(),
   }).index("by_room", ["room"]),
@@ -14,19 +14,20 @@ export default defineSchema({
   userId: v.string(),
   name: v.string(),
   lastTyped: v.number(),
-})
+  })
   .index("by_room", ["room"])
   .index("by_room_user", ["room", "userId"]),
 
   presence: defineTable({
-  room: v.string(),
-  userId: v.string(),
-  name: v.string(),
-  lastSeen: v.number(),
-})
+    room: v.string(),
+    userId: v.string(),
+    name: v.string(),
+    sessionId: v.optional(v.string()),
+    lastSeen: v.number(),
+  })
   .index("by_room", ["room"])
-  .index("by_room_user", ["room", "userId"])
-  .index("by_user", ["userId"]),
+  .index("by_user", ["userId"])
+  .index("by_room_user_session", ["room", "userId", "sessionId"]),
 
 });
 

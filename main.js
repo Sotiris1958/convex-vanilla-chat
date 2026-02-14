@@ -10,6 +10,13 @@ const app = document.getElementById("app");
 
 // This is the REAL identity subject used by Convex auth (stable across sessions).
 let mySubject = null;
+const presenceSessionId =
+  localStorage.getItem("presenceSessionId") ??
+  (() => {
+    const id = crypto.randomUUID();
+    localStorage.setItem("presenceSessionId", id);
+    return id;
+  })();
 
 // -------------------- tiny router --------------------
 function navigate(path) {
