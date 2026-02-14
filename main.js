@@ -182,7 +182,7 @@ function reactionButtonsHtml(m) {
 }
 
 // -------------------- message render --------------------
-function renderMessages(messagesDesc) {
+function renderMessages(messagesDesc, { stickToBottom = true } = {}) {
   const list = document.getElementById("messages");
   const messages = [...(messagesDesc ?? [])].reverse(); // oldest -> newest
 
@@ -225,7 +225,10 @@ function renderMessages(messagesDesc) {
 
   // scroll
   const scroller = list.parentElement;
-  scroller.scrollTop = scroller.scrollHeight;
+	if (stickToBottom) {
+	  scroller.scrollTop = scroller.scrollHeight;
+	}
+
 
   // wire edit/delete actions
   list.querySelectorAll("button[data-action]").forEach((btn) => {
@@ -322,7 +325,7 @@ async function refreshMessages() {
   msgCursor = first.continueCursor;
   msgIsDone = first.isDone;
 
-  renderMessages(msgItems);
+  renderMessages(msgItems, { stickToBottom: false })
   updateLoadOlderButton();
 }
 
@@ -557,22 +560,29 @@ async function renderChat() {
   document.getElementById("loadOlder").addEventListener("click", async () => {
 	  if (msgIsDone) return;
 
-		  const room = roomValue();
-		  const next = await convex.query(api.messages.pageByRoom, {
-			room,
-			cursor: msgCursor,
-			limit: 30,
+	  const scroller = document.getElementById("messages").parentElement;
+	  const prevScrollHeight = scroller.scrollHeight;
+	  const prevScrollTop = scroller.scrollTop;
+
+	  const room = roomValue();
+	  const next = await convex.query(api.messages.pageByRoom, {
+		room,
+		cursor: msgCursor,
+		limit: 10,
 	  });
 
-	  msgItems = msgItems.concat(next.page);  // still newest-first
+	  msgItems = msgItems.concat(next.page); // newest-first
 	  msgCursor = next.continueCursor;
 	  msgIsDone = next.isDone;
 
-	  // Keep scroll position stable: easiest is render then no auto-scroll to bottom.
-	  // Your renderMessages currently auto-scrolls; we’ll adjust next step if you want.
-	  renderMessages(msgItems);
+	  renderMessages(msgItems, { stickToBottom: false })
 	  updateLoadOlderButton();
-	});
+
+	  // keep visual position stable
+	  const newScrollHeight = scroller.scrollHeight;
+	  scroller.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+  });
+
 
   // subscribe initial + debounce resubscribe on room change
   resubscribeRoom();
