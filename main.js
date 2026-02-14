@@ -257,7 +257,7 @@ async function heartbeat() {
   if (!clerk.isSignedIn) return;     // ✅ add this line
   const room = roomValue();
   try {
-    await convex.mutation(api.presence.heartbeat, { room });
+    await convex.mutation(api.presence.heartbeat, { room, sessionId: presenceSessionId });
   } catch (e) {
     console.error("heartbeat failed:", e);
   }
@@ -459,7 +459,7 @@ async function renderChat() {
 
   window.addEventListener("beforeunload", () => {
     try {
-      convex.mutation(api.presence.leave, { room: roomValue() });
+      convex.mutation(api.presence.leave, { room: roomValue(), sessionId: presenceSessionId });
       convex.mutation(api.typing.stop, { room: roomValue() });
     } catch {}
   });
