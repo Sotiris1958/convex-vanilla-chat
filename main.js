@@ -321,14 +321,17 @@ async function refreshTyping() {
 
 async function refreshReactions() {
   const room = roomValue();
-  try {
-    reactionsByMessage = await convex.query(api.reactions.listForRoom, { room });
-  } catch (e) {
-    // If reactions backend not deployed yet, don’t crash the UI.
-    reactionsByMessage = {};
-    console.warn("reactions not available yet:", e?.message ?? e);
+  const rows = await convex.query(api.reactions.listForRoom, { room });
+
+  // Convert rows -> reactionsByMessage[messageId][emoji] = {count, mine}
+  const next = {};
+  for (const r of rows || []) {
+    if (!next[r.messageId]) next[r.messageId] = {};
+    next[r.messageId][r.emoji] = { count: r.count, mine: r.mine };
   }
+  reactionsByMessage = next;
 }
+
 
 // -------------------- presence heartbeat --------------------
 async function heartbeat() {

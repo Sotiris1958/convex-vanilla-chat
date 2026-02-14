@@ -5,27 +5,35 @@ export const listForRoom = query({
   args: { room: v.string() },
   handler: async (ctx, args) => {
     const room = args.room.trim() || "general";
+
     const rows = await ctx.db
       .query("reactions")
       .withIndex("by_room_message", (q) => q.eq("room", room))
       .collect();
 
-    // group: messageId -> emoji -> count + mine
     const identity = await ctx.auth.getUserIdentity();
     const me = identity?.subject ?? null;
 
-    const byMsg: Record<string, Record<string, { count: number; mine: boolean }>> = {};
+    // Aggregate by (messageId, emoji)
+    const map = new Map<string, { messageId: string; emoji: string; count: number; mine: boolean }>();
 
     for (const r of rows) {
-      const mid = r.messageId;
-      const midKey = mid.toString();
-      byMsg[midKey] ??= {};
-      byMsg[midKey][r.emoji] ??= { count: 0, mine: false };
-      byMsg[midKey][r.emoji].count += 1;
-      if (me && r.userId === me) byMsg[midKey][r.emoji].mine = true;
+      const key = `${r.messageId.toString()}|${r.emoji}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.count += 1;
+        if (me && r.userId === me) existing.mine = true;
+      } else {
+        map.set(key, {
+          messageId: r.messageId.toString(),
+          emoji: r.emoji,
+          count: 1,
+          mine: !!(me && r.userId === me),
+        });
+      }
     }
 
-    return byMsg;
+    return Array.from(map.values());
   },
 });
 
@@ -47,7 +55,7 @@ export const toggle = mutation({
       .unique();
 
     if (existing) {
-      await ctx.db.delete(existing._id); // toggle off
+      await ctx.db.delete(existing._id);
       return { on: false };
     } else {
       await ctx.db.insert("reactions", { messageId: args.messageId, room, userId, emoji });
