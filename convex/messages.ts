@@ -1,6 +1,31 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+export const pageByRoom = query({
+  args: {
+    room: v.string(),
+    cursor: v.optional(v.string()), // Convex cursor as string
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const room = args.room.trim() || "general";
+    const limit = Math.min(Math.max(args.limit ?? 30, 1), 100);
+
+    // Newest -> older
+    const q = ctx.db
+      .query("messages")
+      .withIndex("by_room", (q) => q.eq("room", room))
+      .order("desc");
+
+    const page = args.cursor
+      ? await q.paginate({ cursor: args.cursor, numItems: limit })
+      : await q.paginate({ cursor: null, numItems: limit });
+
+    // page = { page: Doc[], continueCursor: string|null, isDone: boolean }
+    return page;
+  },
+});
+
 export const listByRoom = query({
   args: { room: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {

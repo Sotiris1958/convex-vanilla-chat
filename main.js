@@ -8,6 +8,11 @@ const convex = new ConvexClient(import.meta.env.VITE_CONVEX_URL);
 const clerk = new Clerk(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 const app = document.getElementById("app");
 
+let msgCursor = null;     // for older pages
+let msgIsDone = false;
+let msgItems = [];        // newest-first (we’ll render oldest->newest)
+
+
 // This is the REAL identity subject used by Convex auth (stable across sessions).
 let mySubject = null;
 
@@ -132,6 +137,14 @@ function renderTyping(users) {
 }
 
 // -------------------- reactions helpers --------------------
+function updateLoadOlderButton() {
+  const btn = document.getElementById("loadOlder");
+  if (!btn) return;
+  btn.disabled = msgIsDone;
+  btn.textContent = msgIsDone ? "No older messages" : "Load older";
+}
+
+
 const REACTION_CHOICES = ["👍", "❤️", "😂", "😮"];
 
 function getMsgReactions(m) {
@@ -303,9 +316,16 @@ function renderMessages(messagesDesc) {
 // -------------------- refreshers --------------------
 async function refreshMessages() {
   const room = roomValue();
-  const data = await convex.query(api.messages.listByRoom, { room, limit: 100 });
-  renderMessages(data);
+  const first = await convex.query(api.messages.pageByRoom, { room, limit: 30 });
+
+  msgItems = first.page;             // newest-first
+  msgCursor = first.continueCursor;
+  msgIsDone = first.isDone;
+
+  renderMessages(msgItems);
+  updateLoadOlderButton();
 }
+
 
 async function refreshPresence() {
   const room = roomValue();
@@ -490,8 +510,12 @@ async function renderChat() {
       </header>
 
       <main style="border:1px solid #ddd; border-radius:10px; height:55vh; overflow:auto; padding:10px;">
-        <ul id="messages" style="list-style:none; padding:0; margin:0; display:grid; gap:8px;"></ul>
-      </main>
+		<div style="display:flex; justify-content:center; margin-bottom:10px;">
+			<button id="loadOlder" type="button">Load older</button>
+		</div>
+		<ul id="messages" style="list-style:none; padding:0; margin:0; display:grid; gap:8px;"></ul>
+	  </main>
+
 
       <footer>
         <form id="form" style="display:grid; grid-template-columns: 1fr auto; gap:10px;">
@@ -529,6 +553,26 @@ async function renderChat() {
   roomInput.addEventListener("input", () =>
     localStorage.setItem("chatRoom", roomInput.value)
   );
+  
+  document.getElementById("loadOlder").addEventListener("click", async () => {
+	  if (msgIsDone) return;
+
+		  const room = roomValue();
+		  const next = await convex.query(api.messages.pageByRoom, {
+			room,
+			cursor: msgCursor,
+			limit: 30,
+	  });
+
+	  msgItems = msgItems.concat(next.page);  // still newest-first
+	  msgCursor = next.continueCursor;
+	  msgIsDone = next.isDone;
+
+	  // Keep scroll position stable: easiest is render then no auto-scroll to bottom.
+	  // Your renderMessages currently auto-scrolls; we’ll adjust next step if you want.
+	  renderMessages(msgItems);
+	  updateLoadOlderButton();
+	});
 
   // subscribe initial + debounce resubscribe on room change
   resubscribeRoom();
