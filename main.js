@@ -316,7 +316,7 @@ function renderMessages(messagesDesc) {
 // -------------------- refreshers --------------------
 async function refreshMessages() {
   const room = roomValue();
-  const first = await convex.query(api.messages.pageByRoom, { room, limit: 30 });
+  const first = await convex.query(api.messages.pageByRoom, { room, limit: 10 });
 
   msgItems = first.page;             // newest-first
   msgCursor = first.continueCursor;
