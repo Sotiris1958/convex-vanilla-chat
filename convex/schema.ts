@@ -17,6 +17,17 @@ export default defineSchema({
   })
   .index("by_room", ["room"])
   .index("by_room_user", ["room", "userId"]),
+  
+  reactions: defineTable({
+  messageId: v.id("messages"),
+  room: v.string(),
+  userId: v.string(),     // identity.subject
+  emoji: v.string(),      // "👍", "❤️", ...
+})
+  .index("by_message", ["messageId"])
+  .index("by_room_message", ["room", "messageId"])
+  .index("by_message_user_emoji", ["messageId", "userId", "emoji"]),
+
 
   presence: defineTable({
     room: v.string(),

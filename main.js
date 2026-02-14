@@ -10,6 +10,8 @@ const app = document.getElementById("app");
 
 // This is the REAL identity subject used by Convex auth (stable across sessions).
 let mySubject = null;
+
+// Presence session (one per browser install) so presence docs are deterministic.
 const presenceSessionId =
   localStorage.getItem("presenceSessionId") ??
   (() => {
@@ -18,13 +20,15 @@ const presenceSessionId =
     return id;
   })();
 
+// Reactions state: messageId -> emoji -> {count, mine}
+let reactionsByMessage = {};
+
 // -------------------- tiny router --------------------
 function navigate(path) {
   history.pushState({}, "", path);
   renderRoute().catch(console.error);
 }
 window.addEventListener("popstate", () => renderRoute().catch(console.error));
-
 function currentPath() {
   return window.location.pathname || "/";
 }
@@ -79,6 +83,7 @@ async function renderSignIn() {
 let unsubMessages = null;
 let unsubPresence = null;
 let unsubTyping = null;
+let unsubReactions = null;
 
 let heartbeatTimer = null;
 let typingPollTimer = null;
@@ -126,6 +131,43 @@ function renderTyping(users) {
     .join(" ")}`;
 }
 
+// -------------------- reactions helpers --------------------
+const REACTION_CHOICES = ["👍", "❤️", "😂", "😮"];
+
+function getMsgReactions(m) {
+  return reactionsByMessage?.[m._id] ?? {};
+}
+
+function reactionButtonsHtml(m) {
+  const r = getMsgReactions(m);
+  const buttons = REACTION_CHOICES.map((emoji) => {
+    const info = r?.[emoji];
+    const count = info?.count ?? 0;
+    const mine = info?.mine ?? false;
+
+    const label = count > 0 ? `${emoji} ${count}` : emoji;
+    return `<button class="reactbtn ${mine ? "on" : ""}" data-emoji="${escapeHtml(
+      emoji
+    )}" title="React ${escapeHtml(emoji)}">${escapeHtml(label)}</button>`;
+  }).join("");
+
+  // Also render any “extra” emoji that exist in DB but not in choices
+  const extras = Object.keys(r || {})
+    .filter((e) => !REACTION_CHOICES.includes(e))
+    .map((emoji) => {
+      const info = r?.[emoji];
+      const count = info?.count ?? 0;
+      const mine = info?.mine ?? false;
+      const label = `${emoji} ${count}`;
+      return `<button class="reactbtn ${mine ? "on" : ""}" data-emoji="${escapeHtml(
+        emoji
+      )}" title="React ${escapeHtml(emoji)}">${escapeHtml(label)}</button>`;
+    })
+    .join("");
+
+  return `<div class="reactions" data-mid="${m._id}">${buttons}${extras}</div>`;
+}
+
 // -------------------- message render --------------------
 function renderMessages(messagesDesc) {
   const list = document.getElementById("messages");
@@ -137,7 +179,6 @@ function renderMessages(messagesDesc) {
 
       // ✅ Correct ownership check (works across Google/email/etc.)
       const isMine = mySubject && m.authorId === mySubject;
-
       const isEditing = editingId === m._id;
 
       const actions = isMine
@@ -154,6 +195,8 @@ function renderMessages(messagesDesc) {
            </div>`
         : `<div class="body">${escapeHtml(m.body)}</div>`;
 
+      const reactionsHtml = reactionButtonsHtml(m);
+
       return `
         <li>
           <div class="meta">
@@ -162,6 +205,7 @@ function renderMessages(messagesDesc) {
             ${actions}
           </div>
           ${bodyHtml}
+          ${reactionsHtml}
         </li>`;
     })
     .join("");
@@ -170,14 +214,13 @@ function renderMessages(messagesDesc) {
   const scroller = list.parentElement;
   scroller.scrollTop = scroller.scrollHeight;
 
-  // wire actions
+  // wire edit/delete actions
   list.querySelectorAll("button[data-action]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const action = btn.dataset.action;
       const id = btn.dataset.id;
 
       if (action === "edit") {
-        // Start edit mode
         const msg = messages.find((x) => x._id === id);
         if (!msg) return;
 
@@ -185,7 +228,6 @@ function renderMessages(messagesDesc) {
         editingText = msg.body;
         renderMessages(messagesDesc);
 
-        // focus input
         const input = document.getElementById("editInput");
         if (input) {
           input.focus();
@@ -231,6 +273,31 @@ function renderMessages(messagesDesc) {
       }
     });
   });
+
+  // wire reactions
+  list.querySelectorAll(".reactions").forEach((wrap) => {
+    const mid = wrap.getAttribute("data-mid");
+    wrap.querySelectorAll("button[data-emoji]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const emoji = btn.getAttribute("data-emoji");
+        if (!mid || !emoji) return;
+
+        try {
+          await convex.mutation(api.reactions.toggle, {
+            room: roomValue(),
+            messageId: mid,
+            emoji,
+          });
+          // onUpdate will refresh; we can be snappy:
+          refreshReactions()
+            .then(() => refreshMessages())
+            .catch(console.error);
+        } catch (e) {
+          console.error("reaction toggle failed:", e);
+        }
+      });
+    });
+  });
 }
 
 // -------------------- refreshers --------------------
@@ -252,17 +319,30 @@ async function refreshTyping() {
   renderTyping(users);
 }
 
-// -------------------- presence heartbeat --------------------
-async function heartbeat() {
-  if (!clerk.isSignedIn) return;     // ✅ add this line
+async function refreshReactions() {
   const room = roomValue();
   try {
-    await convex.mutation(api.presence.heartbeat, { room, sessionId: presenceSessionId });
+    reactionsByMessage = await convex.query(api.reactions.listForRoom, { room });
+  } catch (e) {
+    // If reactions backend not deployed yet, don’t crash the UI.
+    reactionsByMessage = {};
+    console.warn("reactions not available yet:", e?.message ?? e);
+  }
+}
+
+// -------------------- presence heartbeat --------------------
+async function heartbeat() {
+  if (!clerk.isSignedIn) return;
+  const room = roomValue();
+  try {
+    await convex.mutation(api.presence.heartbeat, {
+      room,
+      sessionId: presenceSessionId,
+    });
   } catch (e) {
     console.error("heartbeat failed:", e);
   }
 }
-
 
 // -------------------- typing helpers --------------------
 async function typingPing() {
@@ -302,6 +382,8 @@ function stopRoomSubscriptions() {
   unsubPresence = null;
   if (unsubTyping) unsubTyping();
   unsubTyping = null;
+  if (unsubReactions) unsubReactions();
+  unsubReactions = null;
 
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = null;
@@ -336,19 +418,34 @@ function resubscribeRoom() {
     { room },
     () => refreshPresence().catch(console.error)
   );
-  unsubTyping = convex.onUpdate(
-    api.typing.listByRoom,
-    { room },
-    () => refreshTyping().catch(console.error)
+  unsubTyping = convex.onUpdate(api.typing.listByRoom, { room }, () =>
+    refreshTyping().catch(console.error)
   );
 
-  refreshMessages().catch(console.error);
+  // reactions subscription (safe if backend exists)
+  try {
+    unsubReactions = convex.onUpdate(api.reactions.listForRoom, { room }, () =>
+      refreshReactions()
+        .then(() => refreshMessages())
+        .catch(console.error)
+    );
+  } catch {
+    unsubReactions = null;
+  }
+
+  // initial loads
+  refreshReactions()
+    .then(() => refreshMessages())
+    .catch(console.error);
+
   refreshPresence().catch(console.error);
   refreshTyping().catch(console.error);
 
+  // presence heartbeat
   heartbeat().catch(console.error);
   heartbeatTimer = setInterval(() => heartbeat().catch(console.error), 10_000);
 
+  // typing refresh (you can remove if you rely purely on onUpdate)
   typingPollTimer = setInterval(() => refreshTyping().catch(console.error), 1_000);
 }
 
@@ -359,7 +456,7 @@ async function renderChat() {
     return;
   }
 
-  // ✅ fetch my identity subject once (used for edit/delete ownership)
+  // fetch my identity subject once (used for edit/delete ownership)
   try {
     mySubject = (await convex.query(api.users.me, {}))?.subject ?? null;
   } catch (e) {
@@ -415,6 +512,10 @@ async function renderChat() {
     .editbox { display:grid; gap:6px; margin-top:6px; }
     .edithelp { font-size:12px; opacity:.7; }
     #editInput { width:100%; }
+    .reactions { display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; }
+    .reactbtn { border:1px solid #ddd; background:#fff; border-radius:999px; padding:3px 10px; cursor:pointer; font-size:12px; opacity:.85; }
+    .reactbtn:hover { opacity:1; }
+    .reactbtn.on { border-color:#999; font-weight:600; opacity:1; }
   `;
   document.head.appendChild(style);
 
@@ -459,7 +560,10 @@ async function renderChat() {
 
   window.addEventListener("beforeunload", () => {
     try {
-      convex.mutation(api.presence.leave, { room: roomValue(), sessionId: presenceSessionId });
+      convex.mutation(api.presence.leave, {
+        room: roomValue(),
+        sessionId: presenceSessionId,
+      });
       convex.mutation(api.typing.stop, { room: roomValue() });
     } catch {}
   });
@@ -468,9 +572,12 @@ async function renderChat() {
 // -------------------- route rendering --------------------
 async function renderRoute() {
   if (!clerk.loaded) return;
+
   if (currentPath() !== "/chat") {
-    stopRoomSubscriptions?.(); // if function exists in your file
+    // stop timers/subscriptions when leaving chat
+    stopRoomSubscriptions();
   }
+
   if (currentPath() === "/chat") return renderChat();
   return renderSignIn();
 }
